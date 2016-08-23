@@ -612,19 +612,30 @@ bool Unit::IsWithinCombatRange(const Unit *obj, float dist2compare) const
     return distsq < maxdist * maxdist;
 }
 
-bool Unit::IsWithinMeleeRange(Unit *obj, float dist) const
+bool Unit::IsWithinMeleeRange(Unit const* obj) const
 {
-    if (!obj || !IsInMap(obj)) return false;
+    if (!obj || !IsInMap(obj) || !InSamePhase(obj))
+        return false;
 
     float dx = GetPositionX() - obj->GetPositionX();
     float dy = GetPositionY() - obj->GetPositionY();
     float dz = GetPositionZ() - obj->GetPositionZ();
     float distsq = dx*dx + dy*dy + dz*dz;
 
-    float sizefactor = GetMeleeReach() + obj->GetMeleeReach();
-    float maxdist = dist + sizefactor;
+    float maxdist = GetMeleeRange(obj);
+    maxdist = std::max(maxdist, NOMINAL_MELEE_RANGE);
 
-    return distsq < maxdist * maxdist;
+    if (obj && isMoving() && obj->isMoving() &&
+        obj->GetTypeId() == TYPEID_PLAYER)
+        maxdist += 5.0f / 3.0f;
+
+    return distsq <= maxdist * maxdist;
+}
+
+float Unit::GetMeleeRange(Unit const* target) const
+{
+    float range = GetCombatReach() + target->GetCombatReach() + 4.0f / 3.0f;
+    return std::max(range, NOMINAL_MELEE_RANGE);
 }
 
 void Unit::GetRandomContactPoint(const Unit* obj, float &x, float &y, float &z, float distance2dMin, float distance2dMax) const
@@ -2488,7 +2499,7 @@ float Unit::CalculateLevelPenalty(SpellEntry const* spellProto) const
     float LvlPenalty = 0.0f;
 
     if (spellProto->spellLevel < 20)
-        LvlPenalty = 20.0f - spellProto->spellLevel * 3.75f;
+        LvlPenalty = (20.0f - spellProto->spellLevel) * 3.75f;
     float LvlFactor = (float(spellProto->spellLevel) + 6.0f) / float(getLevel());
     if (LvlFactor > 1.0f)
         LvlFactor = 1.0f;
@@ -3734,7 +3745,11 @@ bool Unit::AddAura(Aura *Aur)
     {
         SpellMissInfo auraMissInfo = Aur->GetCaster()->MagicAuraHitResult(Aur->GetTarget(), Aur->GetSpellProto());
         if (auraMissInfo != SPELL_MISS_NONE)
+        {
             Aur->GetCaster()->SendSpellMiss(Aur->GetTarget(), Aur->GetId(), auraMissInfo);
+            delete Aur;
+            return false;
+        }
     }
 
     // update single target auras list (before aura add to aura list, to prevent unexpected remove recently added aura)
@@ -4348,6 +4363,18 @@ void Unit::RemoveNotOwnSingleTargetAuras()
             if (m_removedAurasCount > removedAuras + 1)
                 iter = scAuras.begin();
         }
+    }
+}
+
+void Unit::RemoveAllGroupBuffsFromCaster(uint64 casterGUID)
+{
+    for (AuraMap::iterator iter = m_Auras.begin(); iter != m_Auras.end();)
+    {
+        SpellEntry const *spell = iter->second->GetSpellProto();
+        if (IsGroupBuff(spell))
+            RemoveAura(iter);
+        else
+            ++iter;
     }
 }
 
@@ -7297,6 +7324,7 @@ bool Unit::Attack(Unit *victim, bool meleeAttack)
         ((WorldObject*)this)->SendMessageToSet(&data, true);
 
         ToCreature()->CallAssistance();
+        SetUInt32Value(UNIT_NPC_EMOTESTATE, EMOTE_ONESHOT_NONE);
     }
 
     // delay offhand weapon attack to next attack time
@@ -8131,13 +8159,17 @@ int32 Unit::SpellBaseDamageBonusTaken(SpellSchoolMask schoolMask)
 
 bool Unit::isSpellCrit(Unit *pVictim, SpellEntry const *spellProto, SpellSchoolMask schoolMask, WeaponAttackType attackType)
 {
-    // Mobs can't crit with spells
-    if (IS_CREATURE_GUID(GetGUID()))
+    // not critting spell
+    if (spellProto->AttributesEx2 & SPELL_ATTR_EX2_CANT_CRIT)
         return false;
 
-    // not critting spell
-    if ((spellProto->AttributesEx2 & SPELL_ATTR_EX2_CANT_CRIT))
-        return false;
+    // Creatures do not crit with their spells or abilities, unless it is owned by a player
+    if (GetTypeId() == TYPEID_UNIT)
+    {
+        Unit* owner = GetOwner();
+        if (!owner || owner->GetTypeId() != TYPEID_PLAYER)
+            return false;
+    }
 
     float crit_chance = 0.0f;
     switch (spellProto->DmgClass)
@@ -11577,8 +11609,8 @@ void Unit::UpdateReactives(uint32 p_time)
 Unit* Unit::SelectNearbyTarget(float dist) const
 {
     std::list<Unit *> targets;
-    Trinity::AnyUnfriendlyUnitInObjectRangeCheck u_check(this, this, dist);
-    Trinity::UnitListSearcher<Trinity::AnyUnfriendlyUnitInObjectRangeCheck> searcher(this, targets, u_check);
+    Trinity::AnyUnfriendlyNoTotemUnitInObjectRangeCheck u_check(this, this, dist);
+    Trinity::UnitListSearcher<Trinity::AnyUnfriendlyNoTotemUnitInObjectRangeCheck> searcher(this, targets, u_check);
     VisitNearbyObject(dist, searcher);
 
     // remove current target
@@ -11913,6 +11945,7 @@ bool Unit::HandleMendingAuraProc(Aura* triggeredByAura)
                 mod->charges = 0;
 
                 caster->AddSpellMod(mod, true);
+                CastSpell(target, 41637, true);
                 CastCustomSpell(target, spellProto->Id, &heal, NULL, NULL, true, NULL, triggeredByAura, caster->GetGUID());
                 caster->AddSpellMod(mod, false);
 

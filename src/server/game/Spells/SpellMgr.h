@@ -430,6 +430,8 @@ bool IsAuraAddedBySpell(uint32 auraType, uint32 spellId);
 
 bool IsSpellAllowedInLocation(SpellEntry const *spellInfo, uint32 map_id, uint32 zone_id, uint32 area_id);
 
+bool IsGroupBuff(SpellEntry const* spellInfo);
+
 extern bool IsAreaEffectTarget[TOTAL_SPELL_TARGETS];
 inline bool IsAreaOfEffectSpell(SpellEntry const *spellInfo)
 {
@@ -502,6 +504,15 @@ uint8 GetErrorAtShapeshiftedCast (SpellEntry const *spellInfo, uint32 form);
 inline bool IsChanneledSpell(SpellEntry const* spellInfo)
 {
     return (spellInfo->AttributesEx & (SPELL_ATTR_EX_CHANNELED_1 | SPELL_ATTR_EX_CHANNELED_2));
+}
+
+inline bool IsPetTargetSpell(SpellEntry const* spellInfo)
+{
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+        if (spellInfo->EffectImplicitTargetA[i] == TARGET_UNIT_PET || spellInfo->EffectImplicitTargetB[i] == TARGET_UNIT_PET)
+            return true;
+
+    return false;
 }
 
 inline bool NeedsComboPoints(SpellEntry const* spellInfo)

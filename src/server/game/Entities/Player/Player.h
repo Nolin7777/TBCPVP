@@ -1271,7 +1271,7 @@ class Player : public Unit, public GridObject<Player>
         void AddQuest(Quest const *pQuest, Object *questGiver);
         void CompleteQuest(uint32 quest_id);
         void IncompleteQuest(uint32 quest_id);
-        void RewardQuest(Quest const *pQuest, uint32 reward, Object* questGiver, bool announce = true);
+        void RewardQuest(Quest const *quest, uint32 reward, Object* questGiver, bool announce = true);
 
         void FailQuest(uint32 questId);
         bool SatisfyQuestSkillOrClass(Quest const* qInfo, bool msg);
@@ -1889,6 +1889,8 @@ class Player : public Unit, public GridObject<Player>
         uint32 GetArenaPoints() { return GetUInt32Value(PLAYER_FIELD_ARENA_CURRENCY); }
         void ModifyHonorPoints(int32 value);
         void ModifyArenaPoints(int32 value);
+
+        uint8 GetHighestPvPRankIndex();
         uint32 GetMaxPersonalArenaRatingRequirement();
 
         //End of PvP System
@@ -2250,6 +2252,7 @@ class Player : public Unit, public GridObject<Player>
         void UnsetAuraUpdateMask(uint8 slot) { m_auraUpdateMask &= ~(uint64(1) << slot); }
         Player* GetNextRandomRaidMember(float radius);
         PartyResult CanUninviteFromGroup() const;
+        void UpdateGroupLeaderFlag(const bool remove = false);
 
         // BattleGround Group System
         void SetBattleGroundRaid(Group *group, int8 subgroup = -1);

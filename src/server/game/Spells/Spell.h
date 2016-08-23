@@ -374,7 +374,7 @@ class Spell
         void _handle_finish_phase();
 
         uint8 CheckItems();
-        uint8 CheckRange(bool strict, bool initialCheck = true);
+        uint8 CheckRange(bool strict, bool checkFacing = true, float modifier = 0.0f);
         uint8 CheckPower();
         uint8 CheckCasterAuras() const;
 
@@ -468,6 +468,7 @@ class Spell
     protected:
 
         void SendLoot(uint64 guid, LootType loottype);
+        void GetMinMaxRange(bool strict, float& minRange, float& maxRange);
 
         Unit* const m_caster;
 

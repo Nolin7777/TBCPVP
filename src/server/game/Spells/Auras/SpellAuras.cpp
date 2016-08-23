@@ -511,6 +511,8 @@ void Aura::SetModifier(AuraType t, int32 a, uint32 pt, int32 miscValue)
 
 void Aura::Update(uint32 diff)
 {
+    Unit* caster = GetCaster();
+
     if (m_duration > 0)
     {
         m_duration -= diff;
@@ -522,7 +524,7 @@ void Aura::Update(uint32 diff)
         // all spells with manaPerSecond/manaPerSecondPerLevel have aura in effect 0
         if (GetEffIndex() == 0 && m_timeCla <= 0)
         {
-            if (Unit* caster = GetCaster())
+            if (caster)
             {
                 Powers powertype = Powers(m_spellProto->powerType);
                 int32 manaPerSecond = m_spellProto->manaPerSecond + m_spellProto->manaPerSecondPerLevel * caster->getLevel();
@@ -546,32 +548,11 @@ void Aura::Update(uint32 diff)
 
     if (IsChanneledSpell(m_spellProto) && !pRealTarget->isPossessed() && pRealTarget->GetGUID() != GetCasterGUID())
     {
-        Unit* caster = GetCaster();
         if (!caster)
         {
             m_target->RemoveAura(GetId(), GetEffIndex());
             return;
         }
-
-        // Get spell range
-        float radius;
-        SpellModOp mod;
-        if (m_spellProto->EffectRadiusIndex[GetEffIndex()])
-        {
-            radius = GetSpellRadius(m_spellProto, GetEffIndex(), false);
-            mod = SPELLMOD_RADIUS;
-        }
-        else
-        {
-            radius = GetSpellMaxRange(sSpellRangeStore.LookupEntry(m_spellProto->rangeIndex));
-            mod = SPELLMOD_RANGE;
-        }
-
-        if (Player* modOwner = caster->GetSpellModOwner())
-            modOwner->ApplySpellMod(GetId(), mod, radius, NULL);
-
-        if (!caster->IsWithinDistInMap(pRealTarget, radius))
-            return;
     }
 
     if (m_isPeriodic && (m_duration >= 0 || m_isPassive || m_permanent))
@@ -579,6 +560,37 @@ void Aura::Update(uint32 diff)
         m_periodicTimer -= diff;
         if (m_periodicTimer <= 0)                            // tick also at m_periodicTimer == 0 to prevent lost last tick in case max m_duration == (max m_periodicTimer)*N
         {
+            if (IsChanneledSpell(m_spellProto) && GetCasterGUID() != m_target->GetGUID())
+            {
+                // Check Range
+                float maxRange = GetSpellMaxRange(m_spellProto->Id) * 1.5f;
+
+                if (Player* modOwner = caster->GetSpellModOwner())
+                    modOwner->ApplySpellMod(GetId(), SPELLMOD_RANGE, maxRange, nullptr);
+
+                if (!caster->IsWithinDistInMap(m_target, maxRange))
+                {
+                    caster->InterruptSpell(CURRENT_CHANNELED_SPELL);
+                    return;
+                }
+
+                // Check Isolated
+                if (IsPetTargetSpell(m_spellProto))
+                {
+                    if (Player* plr = caster->ToPlayer())
+                    {
+                        if (Pet* pet = plr->GetPet())
+                        {
+                            if (pet->hasUnitState(UNIT_STAT_ISOLATED))
+                            {
+                                caster->InterruptSpell(CURRENT_CHANNELED_SPELL);
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+
             ++m_tickNumber;
 
             if (m_modifier.m_auraname == SPELL_AURA_MOD_REGEN ||
@@ -5867,7 +5879,10 @@ void Aura::PeriodicTick()
             uint32 heal = pCaster->SpellHealingBonusTaken(pCaster, spellProto, int32(new_damage * multiplier), DOT);
 
             int32 gain = pCaster->ModifyHealth(heal);
-            pCaster->getHostileRefManager().threatAssist(pCaster, gain * 0.5f, spellProto);
+
+            // Health Leech effects do not generate healing aggro
+            if (m_modifier.m_auraname != SPELL_AURA_PERIODIC_LEECH)
+                pCaster->getHostileRefManager().threatAssist(pCaster, gain * 0.5f, spellProto);
 
             pCaster->SendHealSpellLog(pCaster, spellProto->Id, heal);
             break;
@@ -6011,10 +6026,7 @@ void Aura::PeriodicTick()
             int32 gain_amount = int32(drain_amount * gain_multiplier);
 
             if (gain_amount)
-            {
                 int32 gain = pCaster->ModifyPower(power, gain_amount);
-                target->AddThreat(pCaster, float(gain) * 0.5f, GetSpellSchoolMask(spellProto), spellProto);
-            }
 
             // Mark of Kaz'rogal
             if (GetId() == 31447 && target->GetPower(power) == 0)

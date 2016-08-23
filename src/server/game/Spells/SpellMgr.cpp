@@ -693,7 +693,7 @@ SpellSpecific GetSpellSpecific(uint32 spellId)
             if (IsSealSpell(spellInfo))
                 return SPELL_SEAL;
 
-            if (spellInfo->SpellFamilyFlags & 0x10000100LL)
+            if (spellInfo->SpellFamilyFlags & 0x10000180LL)
                 return SPELL_BLESSING;
 
             if ((spellInfo->SpellFamilyFlags & 0x00000820180400LL) && (spellInfo->AttributesEx3 & 0x200))
@@ -1070,18 +1070,29 @@ bool IsPositiveSpell(uint32 spellId)
     return true;
 }
 
+bool IsGroupBuff(SpellEntry const* spellInfo)
+{
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        switch (spellInfo->EffectImplicitTargetA[i])
+        {
+            case TARGET_UNIT_PARTY_TARGET:
+            case TARGET_UNIT_TARGET_RAID:
+            case TARGET_UNIT_CLASS_TARGET:
+                return true;
+            default:
+                break;
+        }
+    }
+
+    return false;
+}
+
 bool IsSingleTargetSpell(SpellEntry const *spellInfo)
 {
     // all other single target spells have if it has AttributesEx5
     if (spellInfo->AttributesEx5 & SPELL_ATTR_EX5_SINGLE_TARGET_SPELL)
         return true;
-
-    // TODO - need found Judgements rule
-    switch (GetSpellSpecific(spellInfo->Id))
-    {
-        case SPELL_JUDGEMENT:
-            return true;
-    }
 
     // single target triggered spell.
     // Not real client side single target spell, but it' not triggered until prev. aura expired.
@@ -1100,12 +1111,10 @@ bool IsSingleTargetSpells(SpellEntry const *spellInfo1, SpellEntry const *spellI
         spellInfo1->SpellIconID == spellInfo2->SpellIconID)
         return true;
 
-    // TODO - need found Judgements rule
     SpellSpecific spec1 = GetSpellSpecific(spellInfo1->Id);
     // spell with single target specific types
     switch (spec1)
     {
-        case SPELL_JUDGEMENT:
         case SPELL_MAGE_POLYMORPH:
             if (GetSpellSpecific(spellInfo2->Id) == spec1)
                 return true;
@@ -2947,6 +2956,7 @@ void SpellMgr::LoadSpellCustomAttr()
         case 36554: // Shadowstep
         case 33206: // Pain Supression
         case 44416: // Pain Supression
+        case 14183: // Premeditation
             mSpellCustomAttr[i] = SPELL_ATTR_CU_DONT_BREAK_STEALTH;
             break;
         case 43730: // Stormchops effect

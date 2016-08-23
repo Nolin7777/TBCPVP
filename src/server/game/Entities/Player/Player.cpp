@@ -1622,7 +1622,7 @@ void Player::Update(uint32 p_time)
             // TODO add weapon, skill check
             if (isAttackReady(BASE_ATTACK))
             {
-                if (!IsWithinMeleeRange(pVictim, 1.0f)) // actual auto-attack range calc:
+                if (!IsWithinMeleeRange(pVictim))
                 {
                     setAttackTimer(BASE_ATTACK, (100 + GetAttackTime(BASE_ATTACK)/12));
                     if (m_swingErrorMsg != 1)               // send single time (client auto repeat)
@@ -1659,7 +1659,7 @@ void Player::Update(uint32 p_time)
 
             if (haveOffhandWeapon() && isAttackReady(OFF_ATTACK))
             {
-                if (!IsWithinMeleeRange(pVictim, 0.50f))
+                if (!IsWithinMeleeRange(pVictim))
                     setAttackTimer(OFF_ATTACK, (100 + GetAttackTime(OFF_ATTACK)/12));
                 else if (!HasInArc(2*M_PI/3, pVictim))
                     setAttackTimer(OFF_ATTACK, 100);
@@ -11626,13 +11626,9 @@ Item* Player::EquipItem(uint16 pos, Item *pItem, bool update)
                 SpellEntry const* spellProto = sSpellStore.LookupEntry(cooldownSpell);
 
                 // Swapping weapons resets the melee swing timer
-                uint32 base_attack = GetAttackTime(BASE_ATTACK);
-                setAttackTimer(BASE_ATTACK, (3*GetAttackTime(BASE_ATTACK)/5) + 100);
+                resetAttackTimer(BASE_ATTACK);
                 if (haveOffhandWeapon())
-                {
-                    uint32 off_attack = GetAttackTime(OFF_ATTACK);
-                    setAttackTimer(OFF_ATTACK, (3*GetAttackTime(OFF_ATTACK))/4 + 150);
-                }
+                    resetAttackTimer(OFF_ATTACK);
 
                 if (!spellProto)
                     sLog->outError("Weapon switch cooldown spell %u couldn't be found in Spell.dbc", cooldownSpell);
@@ -14198,48 +14194,53 @@ void Player::IncompleteQuest(uint32 quest_id)
     }
 }
 
-void Player::RewardQuest(Quest const *pQuest, uint32 reward, Object* questGiver, bool announce)
+void Player::RewardQuest(Quest const *quest, uint32 reward, Object* questGiver, bool announce)
 {
-    uint32 quest_id = pQuest->GetQuestId();
+    uint32 quest_id = quest->GetQuestId();
 
     for (int i = 0; i < QUEST_OBJECTIVES_COUNT; ++i)
     {
-        if (pQuest->ReqItemId[i])
-            DestroyItemCount(pQuest->ReqItemId[i], pQuest->ReqItemCount[i], true);
+        if (ItemPrototype const* itemTemplate = sObjectMgr->GetItemPrototype(quest->ReqItemId[i]))
+        {
+            if (quest->ReqItemCount[i] > 0 && (itemTemplate->Bonding == BIND_QUEST_ITEM || itemTemplate->Bonding == BIND_QUEST_ITEM1))
+                DestroyItemCount(quest->ReqItemId[i], 9999, true, true);
+            else 
+                DestroyItemCount(quest->ReqItemId[i], quest->ReqItemCount[i], true, true);
+        }
     }
 
     RemoveTimedQuest(quest_id);
 
-    if (pQuest->GetRewChoiceItemsCount() > 0)
+    if (quest->GetRewChoiceItemsCount() > 0)
     {
-        if (uint32 itemId = pQuest->RewChoiceItemId[reward])
+        if (uint32 itemId = quest->RewChoiceItemId[reward])
         {
             ItemPosCountVec dest;
-            if (CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, itemId, pQuest->RewChoiceItemCount[reward]) == EQUIP_ERR_OK)
+            if (CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, itemId, quest->RewChoiceItemCount[reward]) == EQUIP_ERR_OK)
             {
                 Item* item = StoreNewItem(dest, itemId, true);
-                SendNewItem(item, pQuest->RewChoiceItemCount[reward], true, false);
+                SendNewItem(item, quest->RewChoiceItemCount[reward], true, false);
             }
         }
     }
 
-    if (pQuest->GetRewItemsCount() > 0)
+    if (quest->GetRewItemsCount() > 0)
     {
-        for (uint32 i = 0; i < pQuest->GetRewItemsCount(); ++i)
+        for (uint32 i = 0; i < quest->GetRewItemsCount(); ++i)
         {
-            if (uint32 itemId = pQuest->RewItemId[i])
+            if (uint32 itemId = quest->RewItemId[i])
             {
                 ItemPosCountVec dest;
-                if (CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, itemId, pQuest->RewItemCount[i]) == EQUIP_ERR_OK)
+                if (CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, itemId, quest->RewItemCount[i]) == EQUIP_ERR_OK)
                 {
                     Item* item = StoreNewItem(dest, itemId, true);
-                    SendNewItem(item, pQuest->RewItemCount[i], true, false);
+                    SendNewItem(item, quest->RewItemCount[i], true, false);
                 }
             }
         }
     }
 
-    RewardReputation(pQuest);
+    RewardReputation(quest);
 
     uint16 log_slot = FindQuestSlot(quest_id);
     if (log_slot < MAX_QUEST_LOG_SIZE)
@@ -14248,35 +14249,35 @@ void Player::RewardQuest(Quest const *pQuest, uint32 reward, Object* questGiver,
     QuestStatusData& q_status = mQuestStatus[quest_id];
 
     // Not give XP in case already completed once repeatable quest
-    uint32 XP = q_status.m_rewarded ? 0 : uint32(pQuest->XPValue(this)*sWorld->getRate(RATE_XP_QUEST));
+    uint32 XP = q_status.m_rewarded ? 0 : uint32(quest->XPValue(this)*sWorld->getRate(RATE_XP_QUEST));
 
     if (getLevel() < sWorld->getConfig(CONFIG_MAX_PLAYER_LEVEL))
         GiveXP(XP , NULL);
     else
-        ModifyMoney(int32(pQuest->GetRewMoneyMaxLevel() * sWorld->getRate(RATE_DROP_MONEY)));
+        ModifyMoney(int32(quest->GetRewMoneyMaxLevel() * sWorld->getRate(RATE_DROP_MONEY)));
 
     // Give player extra money if GetRewOrReqMoney > 0 and get ReqMoney if negative
-    ModifyMoney(pQuest->GetRewOrReqMoney());
+    ModifyMoney(quest->GetRewOrReqMoney());
 
     // honor reward
-    if (pQuest->GetRewHonorableKills())
-        RewardHonor(NULL, 0, Trinity::Honor::hk_honor_at_level(getLevel(), pQuest->GetRewHonorableKills()));
+    if (quest->GetRewHonorableKills())
+        RewardHonor(NULL, 0, Trinity::Honor::hk_honor_at_level(getLevel(), quest->GetRewHonorableKills()));
 
     // title reward
-    if (pQuest->GetCharTitleId())
+    if (quest->GetCharTitleId())
     {
-        if (CharTitlesEntry const* titleEntry = sCharTitlesStore.LookupEntry(pQuest->GetCharTitleId()))
+        if (CharTitlesEntry const* titleEntry = sCharTitlesStore.LookupEntry(quest->GetCharTitleId()))
             SetTitle(titleEntry);
     }
 
     // Send reward mail
-    if (uint32 mail_template_id = pQuest->GetRewMailTemplateId())
-        MailDraft(mail_template_id).SendMailTo(this, questGiver, MAIL_CHECK_MASK_HAS_BODY, pQuest->GetRewMailDelaySecs());
+    if (uint32 mail_template_id = quest->GetRewMailTemplateId())
+        MailDraft(mail_template_id).SendMailTo(this, questGiver, MAIL_CHECK_MASK_HAS_BODY, quest->GetRewMailDelaySecs());
 
-    if (pQuest->IsDaily())
+    if (quest->IsDaily())
         SetDailyQuestStatus(quest_id);
 
-    if (!pQuest->IsRepeatable())
+    if (!quest->IsRepeatable())
         SetQuestStatus(quest_id, QUEST_STATUS_COMPLETE);
     else
         SetQuestStatus(quest_id, QUEST_STATUS_NONE);
@@ -14286,21 +14287,21 @@ void Player::RewardQuest(Quest const *pQuest, uint32 reward, Object* questGiver,
         q_status.uState = QUEST_CHANGED;
 
     if (announce)
-        SendQuestReward(pQuest, XP, questGiver);
+        SendQuestReward(quest, XP, questGiver);
 
     if (Creature* questNpc = questGiver->ToCreature())
-        sScriptMgr->QuestComplete(this, questNpc, pQuest);
+        sScriptMgr->QuestComplete(this, questNpc, quest);
 
     // cast spells after mark quest complete (some spells have quest completed state reqyurements in spell_area data)
-    if (pQuest->GetRewSpellCast() > 0)
-        CastSpell(this, pQuest->GetRewSpellCast(), true);
-    else if (pQuest->GetRewSpell() > 0)
-        CastSpell(this, pQuest->GetRewSpell(), true);
+    if (quest->GetRewSpellCast() > 0)
+        CastSpell(this, quest->GetRewSpellCast(), true);
+    else if (quest->GetRewSpell() > 0)
+        CastSpell(this, quest->GetRewSpell(), true);
 }
 
 void Player::FailQuest(uint32 questId)
 {
-    if (Quest const* pQuest = sObjectMgr->GetQuestTemplate(questId))
+    if (Quest const* quest = sObjectMgr->GetQuestTemplate(questId))
     {
         SetQuestStatus(questId, QUEST_STATUS_FAILED);
 
@@ -14312,7 +14313,7 @@ void Player::FailQuest(uint32 questId)
             SetQuestSlotState(log_slot, QUEST_STATE_FAIL);
         }
 
-        if (pQuest->HasFlag(QUEST_TRINITY_FLAGS_TIMED))
+        if (quest->HasFlag(QUEST_TRINITY_FLAGS_TIMED))
         {
             QuestStatusData& q_status = mQuestStatus[questId];
 
@@ -14323,6 +14324,18 @@ void Player::FailQuest(uint32 questId)
         }
         else
             SendQuestFailed(questId);
+
+        // Destroy quest items on quest failure
+        for (int i = 0; i < QUEST_OBJECTIVES_COUNT; ++i)
+        {
+            if (ItemPrototype const* itemTemplate = sObjectMgr->GetItemPrototype(quest->ReqItemId[i]))
+            {
+                if (quest->ReqItemCount[i] > 0 && (itemTemplate->Bonding == BIND_QUEST_ITEM || itemTemplate->Bonding == BIND_QUEST_ITEM1))
+                    DestroyItemCount(quest->ReqItemId[i], 9999, true, true);
+                else 
+                    DestroyItemCount(quest->ReqItemId[i], quest->ReqItemCount[i], true, true);
+            }
+        }
     }
 }
 
@@ -16878,6 +16891,8 @@ void Player::_LoadGroup(QueryResult_AutoPtr result)
             }
         }
     }
+
+    UpdateGroupLeaderFlag();
 }
 
 void Player::_LoadBoundInstances(QueryResult_AutoPtr result)
@@ -19401,6 +19416,19 @@ uint32 Player::GetMaxPersonalArenaRatingRequirement()
     return max_personal_rating;
 }
 
+uint8 Player::GetHighestPvPRankIndex()
+{
+    uint8 index = 0;
+    for (uint8 rank = 1; rank <= 28; ++rank)
+    {
+        // Old rank index starts at 5, values below 5 are discontinued negative ranks
+        if (HasTitle(rank))
+            index = (rank <= 14) ? (rank + 4) : (rank - 10);
+    }
+
+    return index;
+}
+
 void Player::UpdateHomebindTime(uint32 time)
 {
     // GMs never get homebind timer online
@@ -21323,6 +21351,18 @@ PartyResult Player::CanUninviteFromGroup() const
         return PARTY_RESULT_INVITE_RESTRICTED;
 
     return PARTY_RESULT_OK;
+}
+
+void Player::UpdateGroupLeaderFlag(const bool remove /*= false*/)
+{
+    const Group* group = GetGroup();
+    if (HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_GROUP_LEADER))
+    {
+        if (remove || !group || group->GetLeaderGUID() != GetGUID())
+            RemoveFlag(PLAYER_FLAGS, PLAYER_FLAGS_GROUP_LEADER);
+    }
+    else if (!remove && group && group->GetLeaderGUID() == GetGUID())
+        SetFlag(PLAYER_FLAGS, PLAYER_FLAGS_GROUP_LEADER);
 }
 
 void Player::SetBattleGroundRaid(Group* group, int8 subgroup)
