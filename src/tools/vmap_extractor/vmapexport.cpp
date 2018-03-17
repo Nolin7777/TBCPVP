@@ -453,11 +453,7 @@ int main(int argc, char ** argv)
     printf("Extract %s. Beginning work ....\n",versionString);
 
     // Create the working directory
-    if (mkdir(szWorkDirWmo
-#ifdef _XOPEN_UNIX
-                    , 0711
-#endif
-                    ))
+    if (mkdir(szWorkDirWmo, 0711))
             success = (errno == EEXIST);
 
     // prepare archive name list
