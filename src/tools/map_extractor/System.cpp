@@ -24,6 +24,7 @@
 #include <deque>
 #include <set>
 #include <cstdlib>
+#include <unistd.h>
 
 #ifdef WIN32
 #include "direct.h"
